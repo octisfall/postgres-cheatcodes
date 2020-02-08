@@ -10,12 +10,14 @@ https://postgrespro.ru/education/books/sqlprimer
 https://wiki.archlinux.org/index.php/PostgreSQL_(%D0%A0%D1%83%D1%81%D1%81%D0%BA%D0%B8%D0%B9)
 
 
-- материализованные запросы кешируют результат запроса их нужно обновлять. Но как они реагируют на удаление таблиц из
-которых они взяли данные?
+- материализованные запросы кешируют результат запроса их нужно обновлять. Но как они реагируют на удаление таблиц из которых они взяли данные?
 - SHOW search_path показывает к каким схемам постгрис обращается
 - ограничение для поля не пустое ADD CHECK name <> ''
 - USING для изменения поля с текстового на чиловое обозначение
 - LIKE '___'  3 любых символа
+- UNION два одинаковых запроса объединяются UNION ALL оставляет дубликаты у него есть еще 2 брата EXCEPT и INTERSECT
+- Оконные функции для ранжирования отрабатывает после GROUP BY и HAVING
+- count(some_field) считает не NULL значения
 
 ```sql
 SELECT seats.aircraft_code, model, seat_no, fare_conditions
@@ -69,31 +71,24 @@ group by a_code, model, r_code
 ORDER BY num DESC
 ```
 
-- count(some_field) считает не NULL значения
 
-- Запрос с виртуальной таблицей
-```
-SELECT r.min, r.max, count(b.*)
-FROM (VALUES (0, 100000), (100000, 200000), (200000, 1000000), (1000000, 10000000000)) AS r (min, max)
-left join bookings b
-ON b.total_amount >= r.min AND b.total_amount < r.max
-GROUP BY r.min, r.max
-ORDER BY r.min DEsc
-```
-- UNION два одинаковых запроса объединяются UNION ALL оставляет дубликаты
- у него есть еще 2 брата
-
-- Оконные функции для ранжирования
-
-отрабатывает после GROUP BY и HAVING
+оконная функция по дате. Результат
+|book_ref| book_date              | month | day | count|
+|--------|------------------------|-------|-----|------|
+|A60039  | 2016-08-22 12:02:00+08 |8      | 22  |  1   |
+|554340  | 2016-08-23 23:04:00+08 |8      | 23  |  2   |
+|854C4C  | 2016-08-24 10:52:00+08 |8      | 24  |  5   |
+|854C4C  | 2016-08-24 10:52:00+08 |8      | 24  |  5   |
+|854C4C  | 2016-08-24 10:52:00+08 |8      | 24  |  5   |
+|81D8AF  | 2016-08-25 10:22:00+08 |8      | 25  |  6   |
 ```
 SELECT
-b.book_ref,
+       b.book_ref,
        b.book_date,
        extract('month' from b.book_date) AS month,
        extract('day' from b.book_date) AS day,
        count(*) OVER (PARTITION BY date_trunc('month', b.book_date)  -- оконная функция
-           ORDER BY b.book_date ASC) AS count                        --
+           ORDER BY b.book_date ASC) AS count                        
 FROM ticket_flights tf
 JOIN tickets t ON tf.ticket_no = t.ticket_no
 JOIN bookings b on t.book_ref = b.book_ref
@@ -159,24 +154,11 @@ ORDER BY r.min DEsc;
 ```
 
 ```
-SELECT
-    b.book_ref,
-    b.book_date,
-    extract('month' from b.book_date) AS month,
-    extract('day' from b.book_date) AS day,
-    count(*) OVER (PARTITION BY date_trunc('month', b.book_date)
-        ORDER BY b.book_date ASC) AS count
-FROM ticket_flights tf
-         JOIN tickets t ON tf.ticket_no = t.ticket_no
-         JOIN bookings b on t.book_ref = b.book_ref
-WHERE tf.flight_id = 2
-ORDER BY b.book_date;
-```
-```
 SELECT *,
        rank() OVER (PARTITION BY rank() ORDER BY airport_code DESC)
 FROM airports;
 ```
+покажем, как можно сформировать диапазоны сумм бронирований с помощью рекурсивного общего табличного выражения:
 ```
 WITH RECURSIVE ranges (min, max) AS
                    (VALUES (0, 100000)
@@ -187,6 +169,22 @@ WITH RECURSIVE ranges (min, max) AS
                    )
 SELECT * FROM ranges;
 ```
+Теперь давайте скомбинируем рекурсивное общее табличное выражение с выборкой из таблицы bookings:
+|min      | max     | count  |
+|---------|---------|--------|
+|0        | 100000  | 198314 |
+|100000   | 200000  | 46943  |
+|200000   | 300000  | 11916  |
+|300000   | 400000  | 3260   |
+|400000   | 500000  | 1357   |
+|500000   | 600000  | 681    |
+|600000   | 700000  | 222    |
+|700000   | 800000  | 55     |
+|800000   | 900000  | 24     |
+|900000   | 1000000 | 11     |
+|1000000  | 1100000 | 4      |
+|1100000  | 1200000 | 0      |
+|1200000  | 1300000 | 1      |
 ```
 WITH RECURSIVE ranges (min, max) AS
                    (VALUES (0, 100000)
@@ -201,38 +199,34 @@ RIGHT JOIN ranges r ON b.total_amount >= r.min AND b.total_amount < r.max
 GROUP BY r.min, r.max
 ORDER BY r.min;
 ```
-```
+Ответить на вопрос о том, каковы максимальные и минимальные цены билетов
+на все направления, может такой запрос
+```sql
 SELECT f.departure_city, f.arrival_city, max(tf.amount), min(tf.amount)
 FROM flights_v f
 JOIN ticket_flights tf ON f.flight_id = tf.flight_id
 GROUP BY departure_city, arrival_city;
 ```
--- Табличное выражение
-WITH RECURSIVE ranges (min, max, level) AS
-                   (VALUES (0, 100000, 1), (100000, 200000, 1), (200000, 300000, 1)
-                    UNION ALL
-                    SELECT min + 100000, max + 100000, level + 1
-                    FROM ranges
-                    WHERE max < (SELECT max(total_amount) FROM bookings)
-                   )
-SELECT * FROM ranges;
 
--- ИЗМЕНЕНИЕ ДАННЫХ
-
+## ИЗМЕНЕНИЕ ДАННЫХ
+```
 CREATE TEMP TABLE aircrafts_tmp AS SELECT * FROM aircrafts WITH NO DATA;
 ALTER TABLE aircrafts_tmp ADD PRIMARY KEY (aircraft_code);
 ALTER TABLE aircrafts_tmp ADD UNIQUE (model);
 CREATE TEMP TABLE aircrafts_log AS SELECT * FROM aircrafts WITH NO DATA;
-
+```
+```
 ALTER TABLE aircrafts_log ADD COLUMN when_add timestamp;
 ALTER TABLE aircrafts_log ADD COLUMN operation text;
-
+```
+```
 SELECT * FROM aircrafts_tmp;
 SELECT * FROM aircrafts_log;
-
--- Общее табличное выражениею
--- Позволяет вставлять в две таблицы разом и причем разную инфу
--- WITH add_row как переменная, может быть переиспользована
+```
+Общее табличное выражениею
+Позволяет вставлять в две таблицы разом и причем разную инфу
+WITH add_row как переменная, может быть переиспользована
+```
 WITH add_row AS (
     INSERT INTO aircrafts_tmp
         SELECT * FROM aircrafts
@@ -242,10 +236,10 @@ INSERT
 INTO aircrafts_log
 SELECT add_row.aircraft_code, add_row.model, add_row.range, current_timestamp, 'INSERT'
 FROM add_row;
-
--- ON CONFLICT предусматривает два варианта действий.
--- 1. Oтменять добавление новой строки, для которой имеет место конфликт значений
--- ключевых атрибутов, и при этом не порождать сообщения об ошибке.
+```
+ON CONFLICT предусматривает два варианта действий.
+1. Oтменять добавление новой строки, для которой имеет место конфликт значений ключевых атрибутов, и при этом не порождать сообщения об ошибке.
+```
 WITH add_row AS
          ( INSERT INTO aircrafts_tmp
              VALUES ( 'SU9', 'Sukhoi SuperJet-100', 3000 )
@@ -256,15 +250,18 @@ INSERT INTO aircrafts_log
 SELECT add_row.aircraft_code, add_row.model, add_row.range,
        current_timestamp, 'INSERT'
 FROM add_row;
+```
 
 -- Укажем конкретный столбец для проверки конфликтующих значений. Пусть это будет
 -- aircraft_code, т. е. первичный ключ. Для упрощения команды не будем использовать
 -- общее табличное выражение. Добавляемая строка будет конфликтовать
 -- с существующей строкой как по столбцу aircraft_code, так и по столбцу model.
+```
 INSERT INTO aircrafts_tmp
 VALUES ('SU9', 'Sukhoi SuperJet-100', 3000) ON CONFLICT ( aircraft_code )
 DO NOTHING
 RETURNING *;
+```
 
 -- 2. Замена операции добавления новой строки операцией обновления
 -- существующей строки, с которой конфликтует добавляемая строка.
