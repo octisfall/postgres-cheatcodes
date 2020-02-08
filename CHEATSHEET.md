@@ -1,8 +1,6 @@
-# postgres-cheatsheet
+# Postgres cheatsheet, notices, etc. 
 
-Postgres cheatcodes, notices, etc. 
-
-Найденные после прочтения книги 
+Найденные после прочтения книги заметки и примеры SQL запросов
 PostgreSQL. Основы языка SQL: учеб. пособие / Е. П. Моргунов; под ред. Е. В. Рогова, П. В. Лузанова. — СПб.: БХВ-Петербург, 2018.
 
 https://postgrespro.ru/education/books/sqlprimer
@@ -60,7 +58,7 @@ ORDER BY num DESC
 
 но тоже что это
 
-```
+```sql
 SELECT a.aircraft_code as a_code,
        a.model,
        r.aircraft_code as r_code,
@@ -81,7 +79,7 @@ ORDER BY num DESC
 |854C4C  | 2016-08-24 10:52:00+08 |8      | 24  |  5   |
 |854C4C  | 2016-08-24 10:52:00+08 |8      | 24  |  5   |
 |81D8AF  | 2016-08-25 10:22:00+08 |8      | 25  |  6   |
-```
+```sql
 SELECT
        b.book_ref,
        b.book_date,
@@ -98,31 +96,31 @@ ORDER BY b.book_date
 - Существуют так же триггеры и rules для учета изменений в таблице, но в пособии ничего о них нет
 
 Обновление jsonb столбца
-```
+```sql
 ALTER TABLE aircrafts ADD COLUMN specifications jsonb;
 
 UPDATE aircrafts SET specifications = '{"crew": 2, "engines": {"type": "IAE V2500", "num": 2}}'::jsonb
 WHERE aircraft_code = '320';
 ```
 Выборка jsonb столбца
-```
+```sql
 SELECT model, specifications->'engines'->'num' as engines from aircrafts_data;
 ```
 эквивалент команде выше
-```
+```sql
 SELECT model, specifications #> '{engines, num}' as engines from aircrafts_data;
 ```
 Поиск с регулярными выражениями POSIX
-```
+```sql
 select * from bookings.bookings WHERE book_ref !~ '^00';
 ```
-```
+```sql
 SELECT seats.aircraft_code, model, seat_no, fare_conditions
 FROM aircrafts ad, seats
 WHERE seats.aircraft_code = ad.aircraft_code AND ad.model ~ '^Сессна';
 ```
 Cколько маршрутов обслуживают самолеты каждого типа?
-```
+```sql
 SELECT a.aircraft_code as a_code,
        a.model,
        r.aircraft_code as r_code,
@@ -134,7 +132,7 @@ ORDER BY num DESC;
 ```
 Oпределить число пассажиров, не пришедших на регистрацию билетов и, следовательно, не вылетевших в пункт назначения. Будем учитывать толькорейсы, у которых фактическое время вылета не пустое, т. е. рейсы, имеющие статус Departed или Arrived.
 
-```
+```sql
 SELECT count(*)
 FROM (ticket_flights t JOIN flights f on t.flight_id = f.flight_id)
          LEFT JOIN boarding_passes b ON t.ticket_no = b.ticket_no AND t.flight_id = b.flight_id
@@ -144,7 +142,7 @@ WHERE f.actual_departure IS NOT NULL
 
 Предположим, что для выработки финансовой стратегии нашей авиакомпании требуется распределение количества бронирований по диапазонам сумм с шагом в 100 тысяч рублей. Максимальная сумма в одном бронировании составляет 1 204 500 рублей. Учтем это при формировании диапазонов. 
 Виртуальной таблице, создаваемой с помощью ключевого слова VALUES, присваивают имя с помощью ключевого слова AS. После имени в круглых скобках приводится список имен столбцов этой таблицы.
-```
+```sql
 SELECT r.min, r.max, count(b.*)
 FROM (VALUES (0, 100000), (100000, 200000), (200000, 1000000), (1000000, 10000000000), (1100000, 1100001)) AS r (min, max)
          left join bookings b
@@ -153,13 +151,13 @@ GROUP BY r.min, r.max
 ORDER BY r.min DEsc;
 ```
 
-```
+```sql
 SELECT *,
        rank() OVER (PARTITION BY rank() ORDER BY airport_code DESC)
 FROM airports;
 ```
 покажем, как можно сформировать диапазоны сумм бронирований с помощью рекурсивного общего табличного выражения:
-```
+```sql
 WITH RECURSIVE ranges (min, max) AS
                    (VALUES (0, 100000)
                    UNION ALL
@@ -185,7 +183,7 @@ SELECT * FROM ranges;
 |1000000  | 1100000 | 4      |
 |1100000  | 1200000 | 0      |
 |1200000  | 1300000 | 1      |
-```
+```sql
 WITH RECURSIVE ranges (min, max) AS
                    (VALUES (0, 100000)
                     UNION ALL
@@ -209,17 +207,17 @@ GROUP BY departure_city, arrival_city;
 ```
 
 ## ИЗМЕНЕНИЕ ДАННЫХ
-```
+```sql
 CREATE TEMP TABLE aircrafts_tmp AS SELECT * FROM aircrafts WITH NO DATA;
 ALTER TABLE aircrafts_tmp ADD PRIMARY KEY (aircraft_code);
 ALTER TABLE aircrafts_tmp ADD UNIQUE (model);
 CREATE TEMP TABLE aircrafts_log AS SELECT * FROM aircrafts WITH NO DATA;
 ```
-```
+```sql
 ALTER TABLE aircrafts_log ADD COLUMN when_add timestamp;
 ALTER TABLE aircrafts_log ADD COLUMN operation text;
 ```
-```
+```sql
 SELECT * FROM aircrafts_tmp;
 SELECT * FROM aircrafts_log;
 ```
@@ -239,7 +237,7 @@ FROM add_row;
 ```
 ON CONFLICT предусматривает два варианта действий.
 1. Oтменять добавление новой строки, для которой имеет место конфликт значений ключевых атрибутов, и при этом не порождать сообщения об ошибке.
-```
+```sql
 WITH add_row AS
          ( INSERT INTO aircrafts_tmp
              VALUES ( 'SU9', 'Sukhoi SuperJet-100', 3000 )
